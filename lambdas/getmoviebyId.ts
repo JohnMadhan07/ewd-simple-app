@@ -59,7 +59,7 @@ export const handler: Handler = async (event, context) => {
   }
 };
 
-export function createDDbDocClient() {
+ function createDDbDocClient() {
   const ddbClient = new DynamoDBClient({ region: process.env.REGION });
   const marshallOptions = {
     convertEmptyValues: true,

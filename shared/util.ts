@@ -8,7 +8,6 @@ export const generateMovieItem = (movie: Movie) => {
     },
   };
 };
-
 export const generateBatch = (data: Movie[]) => {
   return data.map((e) => {
     return generateMovieItem(e);
