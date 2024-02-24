@@ -5,6 +5,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as custom from "aws-cdk-lib/custom-resources";
 import { generateBatch } from "../shared/util";
 import {movies} from "../seed/movies";
+import * as apig from "aws-cdk-lib/aws-apigateway";
 
 import { Construct } from 'constructs';
 import { Cors } from 'aws-cdk-lib/aws-apigateway';
@@ -54,6 +55,7 @@ export class SimpleAppStack extends cdk.Stack {
         allowedOrigins: ["*"],
       },
     });
+
     const getallMoviesFn = new lambdanode.NodejsFunction(
       this,
       "GetAllMoviesFn",
@@ -76,6 +78,31 @@ export class SimpleAppStack extends cdk.Stack {
         allowedOrigins:["*"],
       },
     })
+        // REST API 
+        const api = new apig.RestApi(this, "RestAPI", {
+          description: "demo api",
+          deployOptions: {
+            stageName: "dev",
+          },
+          defaultCorsPreflightOptions: {
+            allowHeaders: ["Content-Type", "X-Amz-Date"],
+            allowMethods: ["OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"],
+            allowCredentials: true,
+            allowOrigins: ["*"],
+          },
+        });
+    
+        const moviesEndpoint = api.root.addResource("movies");
+        moviesEndpoint.addMethod(
+          "GET",
+          new apig.LambdaIntegration(getallMoviesFn, { proxy: true })
+        );
+    
+        const movieEndpoint = moviesEndpoint.addResource("{movieId}");
+        movieEndpoint.addMethod(
+          "GET",
+          new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
+        );
 
     moviesTable.grantReadData(getMovieByIdFn)
     moviesTable.grantReadData(getallMoviesFn)
