@@ -1,32 +1,17 @@
-import * as cdk from 'aws-cdk-lib';
-import * as lambdanode from 'aws-cdk-lib/aws-lambda-nodejs';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as cdk from "aws-cdk-lib";
+import * as lambdanode from "aws-cdk-lib/aws-lambda-nodejs";
+import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as custom from "aws-cdk-lib/custom-resources";
 import { generateBatch } from "../shared/util";
-import {movies} from "../seed/movies";
+import { movies } from "../seed/movies";
 import * as apig from "aws-cdk-lib/aws-apigateway";
-
-import { Construct } from 'constructs';
-import { Cors } from 'aws-cdk-lib/aws-apigateway';
+import { Construct } from "constructs";
+import { Cors } from "aws-cdk-lib/aws-apigateway";
 
 export class SimpleAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
-
-    const simpleFn = new lambdanode.NodejsFunction(this, "SimpleFn", {
-      architecture: lambda.Architecture.ARM_64,
-      runtime: lambda.Runtime.NODEJS_16_X,
-      entry: `${__dirname}/../lambdas/simple.ts`,
-      timeout: cdk.Duration.seconds(10),
-      memorySize: 128,
-    });
-    const simpleFnURL = simpleFn.addFunctionUrl({
-      authType: lambda.FunctionUrlAuthType.AWS_IAM, 
-      cors: {
-        allowedOrigins: ["*"],
-      },
-    });
     const moviesTable = new dynamodb.Table(this, "MoviesTable", {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       partitionKey: { name: "id", type: dynamodb.AttributeType.NUMBER },
@@ -44,7 +29,7 @@ export class SimpleAppStack extends cdk.Stack {
         memorySize: 128,
         environment: {
           TABLE_NAME: moviesTable.tableName,
-          REGION: 'eu-west-1',
+          REGION: "eu-west-1",
         },
       }
     );
@@ -67,47 +52,62 @@ export class SimpleAppStack extends cdk.Stack {
         memorySize: 128,
         environment: {
           TABLE_NAME: moviesTable.tableName,
-          REGION: 'eu-west-1',
+          REGION: "eu-west-1",
         },
       }
     );
 
-    const getallMoviesURL= getallMoviesFn.addFunctionUrl({
+    const getallMoviesURL = getallMoviesFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
-      cors:{
-        allowedOrigins:["*"],
+      cors: {
+        allowedOrigins: ["*"],
       },
-    })
-        // REST API 
-        const api = new apig.RestApi(this, "RestAPI", {
-          description: "demo api",
-          deployOptions: {
-            stageName: "dev",
-          },
-          defaultCorsPreflightOptions: {
-            allowHeaders: ["Content-Type", "X-Amz-Date"],
-            allowMethods: ["OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"],
-            allowCredentials: true,
-            allowOrigins: ["*"],
-          },
-        });
-    
-        const moviesEndpoint = api.root.addResource("movies");
-        moviesEndpoint.addMethod(
-          "GET",
-          new apig.LambdaIntegration(getallMoviesFn, { proxy: true })
-        );
-    
-        const movieEndpoint = moviesEndpoint.addResource("{movieId}");
-        movieEndpoint.addMethod(
-          "GET",
-          new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
-        );
+    });
+    const newMovieFn = new lambdanode.NodejsFunction(this, "AddMovieFn", {
+      architecture: lambda.Architecture.ARM_64,
+      runtime: lambda.Runtime.NODEJS_16_X,
+      entry: `${__dirname}/../lambdas/addMovie.ts`,
+      timeout: cdk.Duration.seconds(10),
+      memorySize: 128,
+      environment: {
+        TABLE_NAME: moviesTable.tableName,
+        REGION: "eu-west-1",
+      },
+    });
+    // REST API
+    const api = new apig.RestApi(this, "RestAPI", {
+      description: "demo api",
+      deployOptions: {
+        stageName: "dev",
+      },
+      defaultCorsPreflightOptions: {
+        allowHeaders: ["Content-Type", "X-Amz-Date"],
+        allowMethods: ["OPTIONS", "GET", "POST", "PUT", "PATCH", "DELETE"],
+        allowCredentials: true,
+        allowOrigins: ["*"],
+      },
+    });
 
-    moviesTable.grantReadData(getMovieByIdFn)
-    moviesTable.grantReadData(getallMoviesFn)
+    const moviesEndpoint = api.root.addResource("movies");
+    moviesEndpoint.addMethod(
+      "GET",
+      new apig.LambdaIntegration(getallMoviesFn, { proxy: true })
+    );
 
-    new cdk.CfnOutput(this, "Get Movie Function Url", { value: getMovieByIdURL.url });  
+    const movieEndpoint = moviesEndpoint.addResource("{movieId}");
+    movieEndpoint.addMethod(
+      "GET",
+      new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
+    );
+    moviesEndpoint.addMethod(
+      "POST",
+      new apig.LambdaIntegration(newMovieFn, { proxy: true })
+    );
+
+    moviesTable.grantReadData(getMovieByIdFn);
+    moviesTable.grantReadData(getallMoviesFn);
+    moviesTable.grantReadWriteData(newMovieFn)
+
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {
         service: "DynamoDB",
@@ -123,8 +123,11 @@ export class SimpleAppStack extends cdk.Stack {
         resources: [moviesTable.tableArn],
       }),
     });
-
-    new cdk.CfnOutput(this, "Simple Function Url", { value: simpleFnURL.url });
-    new cdk.CfnOutput(this, "Get All Movie Function URL", { value: getallMoviesURL.url });
+    new cdk.CfnOutput(this, "Get Movie Function Url", {
+      value: getMovieByIdURL.url,
+    });
+    new cdk.CfnOutput(this, "Get All Movie Function URL", {
+      value: getallMoviesURL.url,
+    });
   }
 }
