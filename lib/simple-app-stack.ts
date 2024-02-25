@@ -4,7 +4,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as custom from "aws-cdk-lib/custom-resources";
 import { generateBatch } from "../shared/util";
-import { movies } from "../seed/movies";
+import { movies, movieCasts } from "../seed/movies";
 import * as apig from "aws-cdk-lib/aws-apigateway";
 import { Construct } from "constructs";
 import { Cors } from "aws-cdk-lib/aws-apigateway";
@@ -17,6 +17,18 @@ export class SimpleAppStack extends cdk.Stack {
       partitionKey: { name: "id", type: dynamodb.AttributeType.NUMBER },
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       tableName: "Movies",
+    });
+    const movieCastsTable = new dynamodb.Table(this, "MovieCastTable", {
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      partitionKey: { name: "movieId", type: dynamodb.AttributeType.NUMBER },
+      sortKey: { name: "actorName", type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      tableName: "MovieCast",
+    });
+
+    movieCastsTable.addLocalSecondaryIndex({
+      indexName: "roleIx",
+      sortKey: { name: "roleName", type: dynamodb.AttributeType.STRING },
     });
     const getMovieByIdFn = new lambdanode.NodejsFunction(
       this,
@@ -34,12 +46,12 @@ export class SimpleAppStack extends cdk.Stack {
       }
     );
     const deleteMoviebyIdFn = new lambdanode.NodejsFunction(
-      this, 
+      this,
       "DeleteMoviebyIdFN",
       {
         architecture: lambda.Architecture.ARM_64,
-        runtime:lambda.Runtime.NODEJS_16_X,
-        entry:`${__dirname}/../lambdas/deleteMovieById.ts`,
+        runtime: lambda.Runtime.NODEJS_16_X,
+        entry: `${__dirname}/../lambdas/deleteMovieById.ts`,
         timeout: cdk.Duration.seconds(10),
         memorySize: 128,
         environment: {
@@ -47,7 +59,7 @@ export class SimpleAppStack extends cdk.Stack {
           REGION: "eu-west-1",
         },
       }
-    )
+    );
 
     const getMovieByIdURL = getMovieByIdFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
@@ -89,6 +101,21 @@ export class SimpleAppStack extends cdk.Stack {
         REGION: "eu-west-1",
       },
     });
+    const getMovieCastMembersFn = new lambdanode.NodejsFunction(
+      this,
+      "GetCastMemberFn",
+      {
+        architecture: lambda.Architecture.ARM_64,
+        runtime: lambda.Runtime.NODEJS_16_X,
+        entry: `${__dirname}/../lambdas/getMovieCastMember.ts`,
+        timeout: cdk.Duration.seconds(10),
+        memorySize: 128,
+        environment: {
+          TABLE_NAME: movieCastsTable.tableName,
+          REGION: "eu-west-1",
+        },
+      }
+    );
     // REST API
     const api = new apig.RestApi(this, "RestAPI", {
       description: "demo api",
@@ -112,23 +139,27 @@ export class SimpleAppStack extends cdk.Stack {
     const movieEndpoint = moviesEndpoint.addResource("{movieId}");
     movieEndpoint.addMethod(
       "GET",
-      new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })      
+      new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
     );
     movieEndpoint.addMethod(
       "DELETE",
-      new apig.LambdaIntegration(deleteMoviebyIdFn, { proxy: true })      
+      new apig.LambdaIntegration(deleteMoviebyIdFn, { proxy: true })
     );
     moviesEndpoint.addMethod(
       "POST",
       new apig.LambdaIntegration(newMovieFn, { proxy: true })
     );
-    
-   
+    const movieCastEndpoint = moviesEndpoint.addResource("cast");
+    movieCastEndpoint.addMethod(
+      "GET",
+      new apig.LambdaIntegration(getMovieCastMembersFn, { proxy: true })
+    );
 
     moviesTable.grantReadData(getMovieByIdFn);
     moviesTable.grantReadData(getallMoviesFn);
-    moviesTable.grantReadWriteData(newMovieFn)
-    moviesTable.grantReadWriteData(deleteMoviebyIdFn)
+    moviesTable.grantReadWriteData(newMovieFn);
+    moviesTable.grantReadWriteData(deleteMoviebyIdFn);
+    movieCastsTable.grantReadData(getMovieCastMembersFn);
 
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {
@@ -137,12 +168,13 @@ export class SimpleAppStack extends cdk.Stack {
         parameters: {
           RequestItems: {
             [moviesTable.tableName]: generateBatch(movies),
+            [movieCastsTable.tableName]: generateBatch(movieCasts), // Added
           },
         },
         physicalResourceId: custom.PhysicalResourceId.of("moviesddbInitData"), //.of(Date.now().toString()),
       },
       policy: custom.AwsCustomResourcePolicy.fromSdkCalls({
-        resources: [moviesTable.tableArn],
+        resources: [moviesTable.tableArn, movieCastsTable.tableArn], // Includes movie cast
       }),
     });
     new cdk.CfnOutput(this, "Get Movie Function Url", {
