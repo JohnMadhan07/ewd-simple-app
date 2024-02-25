@@ -33,6 +33,21 @@ export class SimpleAppStack extends cdk.Stack {
         },
       }
     );
+    const deleteMoviebyIdFn = new lambdanode.NodejsFunction(
+      this, 
+      "DeleteMoviebyIdFN",
+      {
+        architecture: lambda.Architecture.ARM_64,
+        runtime:lambda.Runtime.NODEJS_16_X,
+        entry:`${__dirname}/../lambdas/deleteMovieById.ts`,
+        timeout: cdk.Duration.seconds(10),
+        memorySize: 128,
+        environment: {
+          TABLE_NAME: moviesTable.tableName,
+          REGION: "eu-west-1",
+        },
+      }
+    )
 
     const getMovieByIdURL = getMovieByIdFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
@@ -97,16 +112,23 @@ export class SimpleAppStack extends cdk.Stack {
     const movieEndpoint = moviesEndpoint.addResource("{movieId}");
     movieEndpoint.addMethod(
       "GET",
-      new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })
+      new apig.LambdaIntegration(getMovieByIdFn, { proxy: true })      
+    );
+    movieEndpoint.addMethod(
+      "DELETE",
+      new apig.LambdaIntegration(deleteMoviebyIdFn, { proxy: true })      
     );
     moviesEndpoint.addMethod(
       "POST",
       new apig.LambdaIntegration(newMovieFn, { proxy: true })
     );
+    
+   
 
     moviesTable.grantReadData(getMovieByIdFn);
     moviesTable.grantReadData(getallMoviesFn);
     moviesTable.grantReadWriteData(newMovieFn)
+    moviesTable.grantReadWriteData(deleteMoviebyIdFn)
 
     new custom.AwsCustomResource(this, "moviesddbInitData", {
       onCreate: {
